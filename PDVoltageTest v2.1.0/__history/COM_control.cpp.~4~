@@ -1,0 +1,401 @@
+//---------------------------------------------------------------------------
+
+
+#pragma hdrstop
+#include "main.h"
+#include <windows.h>    // 安全移除USB裝置用 *要比 vcl.h 早編譯
+#include "COM_control.h"
+
+//---------------------------------------------------------------------------
+
+#pragma package(smart_init)
+HANDLE DEV_hCom;
+extern DWORD WINAPI WORKTESTExecute(LPVOID Param);
+AnsiString DeviceCOM;
+int get_voltage_count = 0;
+float total_current	  = 0;
+bool bLoad =false;
+
+AnsiString g_PD_Vol;
+
+struct ComNum_Info {
+HANDLE handle;
+HANDLE Threadhandle;
+AnsiString ComName;
+};
+struct ComNum_Info comNum_Info[10]; // COM資訊
+int cmd_TimeOut;
+int GetVoltageTimeOut;
+
+cCOM::cCOM(void)
+{
+bCOM_PORT_OPEN = false;
+}
+int cmd_get_system_consumptoin(char *s)
+{
+	TStringList *sList = new TStringList();
+	sList->Delimiter = '\r\n';
+	sList->DelimitedText = AnsiString(s);
+	double dCurrent = FrmMain->CL_DEV_CONTROL->GetNumOfString(sList->Strings[0]);
+	double dVoltage = FrmMain->CL_DEV_CONTROL->GetNumOfString(sList->Strings[1]);
+	delete  sList;
+
+	if(bLoad)
+	{   /*
+		==測試DUT PD負載電壓==
+		1 .load on
+		2 .delay 500
+		3 .get current & voltage  <--┐
+		4 .delay 200  ---------------┘
+		5 .Count of get current & voltage == 5
+		6 .Show Result PASS or FAIL
+		*/
+		get_voltage_count++;
+		float max_Voltage,min_Voltage;
+		for(int i=1;i<=5;i++)
+		{
+			if(((TEdit *)FrmMain->FindComponent("edt_load_max"+AnsiString(i)))->Tag == g_PD_Vol.ToInt())
+			{
+				max_Voltage=((TEdit *)FrmMain->FindComponent("edt_load_max"+AnsiString(i)))->Text.ToDouble();
+				min_Voltage=((TEdit *)FrmMain->FindComponent("edt_load_min"+AnsiString(i)))->Text.ToDouble();
+				break;
+			}
+		}
+		if(dCurrent<(FrmMain->edtSetCurrent->Text.ToDouble()-0.1)||dCurrent>(FrmMain->edtSetCurrent->Text.ToDouble()+0.1))
+		{
+			((TPanel *)FrmMain->FindComponent("pl_full_load_voltage"+g_PD_Vol))->Caption = AnsiString(dCurrent)+"A";
+			return TEST_FAIL;
+		}
+		if(dVoltage<=max_Voltage&&dVoltage>=min_Voltage)
+		{
+			if(get_voltage_count == GetVoltageCount)
+			{
+				((TPanel *)FrmMain->FindComponent("pl_full_load_voltage"+g_PD_Vol))->Caption = dVoltage;
+				return TEST_PASS;
+			}
+			else
+			{
+				return RS232_WRITE;
+			}
+		}
+		else
+		{
+			((TPanel *)FrmMain->FindComponent("pl_full_load_voltage"+g_PD_Vol))->Caption = dVoltage;
+			return TEST_FAIL;
+		}
+	}
+	else
+	{   /*
+		==測試DUT PD負載電壓==
+		1 .load of
+		2 .delay 200
+		3 .get current & voltage
+		4 .Show Result PASS or FAIL
+		*/
+		if(FrmMain->bTEST_END_SWITCH_5V) return TEST_PASS;
+		float max_Voltage,min_Voltage;
+		for(int i=1;i<=5;i++)
+		{
+			if(((TEdit *)FrmMain->FindComponent("edt_load_max"+AnsiString(i)))->Tag == g_PD_Vol.ToInt())
+			{
+				max_Voltage=((TEdit *)FrmMain->FindComponent("edt_max"+AnsiString(i)))->Text.ToDouble();
+				min_Voltage=((TEdit *)FrmMain->FindComponent("edt_min"+AnsiString(i)))->Text.ToDouble();
+				break;
+			}
+		}
+		((TPanel *)FrmMain->FindComponent("pl_read_"+g_PD_Vol+"v_voltage"))->Caption = dVoltage;
+		if(dVoltage<=max_Voltage&&dVoltage>=min_Voltage)
+		{
+			return TEST_PASS;
+		}
+		else
+		{
+			return TEST_FAIL;
+		}
+	}
+}
+const 	CMD_DESC zCMD_MAP[]=
+{
+	{"meas:volt?\n",cmd_get_system_consumptoin},
+};
+bool cCOM::open_dev_com()
+{
+	if(bCOM_PORT_OPEN) return 1;
+
+	DWORD WaitTime=GetTickCount()+5000;
+	if(!strstr(DeviceCOM.c_str(),"COM")) SearchDevCOM(); //偵測是否有裝置名稱
+	get_voltage_count = 0;
+	while(1)
+	{
+		if(strstr(DeviceCOM.c_str(),"COM"))
+		{
+			DEV_hCom = CreateFile(WideString(DeviceCOM).c_bstr(), GENERIC_READ | GENERIC_WRITE, 0, NULL,
+				OPEN_EXISTING, 0, NULL);
+			if (DEV_hCom == INVALID_HANDLE_VALUE) {
+				FrmMain->Delay(100);
+				Dev_Stop();
+				DEV_hCom = CreateFile(WideString(DeviceCOM).c_bstr(), GENERIC_READ | GENERIC_WRITE, 0, NULL,
+					OPEN_EXISTING, 0, NULL);
+				if (DEV_hCom == INVALID_HANDLE_VALUE){
+					CloseHandle(DEV_hCom);
+					bCOM_PORT_OPEN = false;
+					return 0;
+				}
+			}
+			DCB dcb; // 設定comport相關係數
+			GetCommState(DEV_hCom, &dcb);
+			BuildCommDCB(L"115200,n,8,1", &dcb);
+			SetCommState(DEV_hCom, &dcb);
+			// 設定TimeOut
+			COMMTIMEOUTS TimeOut;
+			TimeOut.ReadIntervalTimeout = MAXDWORD;
+			TimeOut.ReadTotalTimeoutMultiplier = 0;
+			TimeOut.ReadTotalTimeoutConstant = 100;
+			TimeOut.WriteTotalTimeoutMultiplier  = 0;
+			TimeOut.WriteTotalTimeoutConstant  = 0;
+			SetCommTimeouts(DEV_hCom, &TimeOut);
+			bCOM_PORT_OPEN = true;
+			return 1;
+		}
+		else if(GetTickCount()>WaitTime)
+		{
+			bCOM_PORT_OPEN = false;
+			return 0;
+		}
+		else FrmMain->Delay(100);
+	}
+}
+int  cCOM::Dev_CMD_Test(AnsiString PDVol)
+{
+	unsigned long Written ;
+	g_PD_Vol = PDVol;
+	int step = RS232_WRITE ;
+	bool bError = false;
+	get_voltage_count = 0;
+	try
+	{
+		while(step)
+		{
+			switch(step)
+			{
+				case RS232_WRITE:
+					if(FrmMain->que_cmd.empty())
+					{
+						FrmMain->que_cmd.push("meas:curr?;meas:volt?\n");
+						FrmMain->Delay(100);
+					}
+				//寫
+					bNoResponse = false;
+					DEBUG(FrmMain->que_cmd.front());
+					WriteFile(DEV_hCom,FrmMain->que_cmd.front().c_str(),FrmMain->que_cmd.front().Length(),&Written,NULL);
+					cmd_TimeOut=GetTickCount()+1000;
+					//DEBUG("time(ms): "+(AnsiString)(GetTickCount()-frmMain->init_time));
+					step=RS232_READ;
+					break;
+				case RS232_READ:
+					//讀
+					if(strstr(FrmMain->que_cmd.front().c_str(),"meas:curr?;meas:volt?"))
+					{
+						DWORD ByteRead;
+						char RXBuff[20];
+						char buff[20];
+						while(1)
+						{
+							ReadFile(DEV_hCom, RXBuff, 20, &ByteRead,NULL);//接收
+							if (ByteRead>0) // 接收到數據
+							{
+								strncpy(buff,RXBuff,ByteRead);
+								step = cmd_get_system_consumptoin(buff);
+								FrmMain->que_cmd.pop();
+								memset(buff, 0, sizeof(buff));
+								memset(RXBuff, 0, sizeof(RXBuff));
+								break;
+							}
+							else if(GetTickCount()>cmd_TimeOut)
+							{
+								FrmMain->g_bError = true;
+								DEBUG("無回應");
+								bNoResponse = true;
+								step = Dev_NO_RESPOND;
+								break;
+							}
+						}
+					}
+					else
+					{
+						if(strstr(FrmMain->que_cmd.front().c_str(),"LOAD ON"))
+						{
+							FrmMain->Delay(400); // LOAD ON Delay
+							bLoad = true;
+							step = RS232_WRITE;
+						}
+						else if(strstr(FrmMain->que_cmd.front().c_str(),"LOAD OFF"))
+						{
+							FrmMain->Delay(300); // LOAD OFF Delay
+							bLoad = false;
+							step = TEST_END;
+						}
+						else
+						{
+
+							step = RS232_WRITE;
+						}
+						FrmMain->Delay(100); // 回應間隔
+						FrmMain->que_cmd.pop();
+					}
+					break;
+				case TEST_PASS:
+					step = TEST_END;
+					break;
+				case TEST_FAIL:
+					bError = true;
+					step = TEST_END;
+					break;
+				case TEST_OCP:
+					step = TEST_END;
+					break;
+				case Dev_NO_RESPOND:
+					CloseHandle(DEV_hCom);
+					bCOM_PORT_OPEN = false;
+					bError = true;
+					step = TEST_END;
+					break;
+				case TEST_END:
+					break;
+
+			}
+		}
+	}
+	catch(...)
+	{
+		DEBUG("123");
+    }
+	return !bError;
+}
+//---------------------------------------------------------------------------
+void cCOM::search_Reg_ComNum() // 取得 regedt COM
+{
+	AnsiString temppath;
+	TRegistry *reg = new TRegistry();
+	TStringList* itemSet = new TStringList();
+	reg->RootKey = HKEY_LOCAL_MACHINE;
+	temppath = "HARDWARE\\DEVICEMAP\\SERIALCOMM";
+	reg->OpenKey(temppath.c_str(), false);
+	reg->GetValueNames(itemSet);
+	for(int i=0;i<itemSet->Count;i++)
+	{
+		AnsiString comName =(AnsiString)reg->ReadString(itemSet->Strings[i]);
+		if(strlen(comName.c_str())>4) comName="\\\\.\\"+comName;
+		comNum_Info[i].ComName=(AnsiString)comName.c_str();
+	}
+	reg->CloseKey();
+	delete itemSet;
+	delete reg;
+}
+void cCOM::SearchDevCOM()// Create多執行緒 找裝置
+{
+	search_Reg_ComNum();
+	int Count=0;
+	while(strstr(comNum_Info[Count].ComName.c_str(),"COM"))
+	{
+		comNum_Info[Count].Threadhandle = ::CreateThread(0, 0, WORKTESTExecute, (void*)Count, 0, NULL);
+		CloseHandle(comNum_Info[Count].Threadhandle);
+		Count++;
+	}
+}
+DWORD WINAPI WORKTESTExecute(LPVOID Param) // 執行續
+{
+
+//開COM
+	comNum_Info[(int)Param].handle = CreateFile(WideString(comNum_Info[(int)Param].ComName).c_bstr(), GENERIC_READ | GENERIC_WRITE, 0, NULL,
+		OPEN_EXISTING, 0, 0);
+	if (comNum_Info[(int)Param].handle != INVALID_HANDLE_VALUE) {
+		DCB dcb; // 設定comport相關係數
+		GetCommState(comNum_Info[(int)Param].handle, &dcb);
+		BuildCommDCB(L"115200,n,8,1", &dcb);
+		SetCommState(comNum_Info[(int)Param].handle, &dcb);
+		// 設定TimeOut
+		COMMTIMEOUTS TimeOut;
+		GetCommTimeouts(comNum_Info[(int)Param].handle, &TimeOut);
+		TimeOut.ReadIntervalTimeout = MAXDWORD;
+		TimeOut.ReadTotalTimeoutMultiplier = 0;
+		TimeOut.ReadTotalTimeoutConstant = 300;  //(總讀取 time out 時間 = 0.1 秒)
+		TimeOut.WriteTotalTimeoutMultiplier = 0;
+		TimeOut.WriteTotalTimeoutConstant = 100; //(總寫入 time out 時間 = 0.1 秒)
+		SetCommTimeouts(comNum_Info[(int)Param].handle, &TimeOut);
+	//寫
+		unsigned long Written ;
+		char* data="*remote;name?\n";
+		WriteFile(comNum_Info[(int)Param].handle,data,strlen(data),&Written,NULL);
+	//讀
+		DWORD ByteRead;
+		char RXBuff[1024];
+		char buff[1024];
+		ReadFile(comNum_Info[(int)Param].handle, RXBuff, 1024, &ByteRead,NULL);//接收
+		if (ByteRead>0) // 接收到數據
+		{
+			strncpy(buff,RXBuff,ByteRead);
+			if(strstr(buff,"3315F"))
+			{
+				DEBUG(AnsiString(buff)+"["+comNum_Info[(int)Param].ComName+"]");
+				DeviceCOM = comNum_Info[(int)Param].ComName;
+			}
+		}
+		CloseHandle(comNum_Info[(int)Param].handle);
+		memset(RXBuff, 0, sizeof(RXBuff));
+	}
+	return 0;
+}
+void cCOM::Dev_Stop() {
+	bCOM_PORT_OPEN = false;
+	FrmMain->Delay(300);
+	FrmMain->que_cmd.c.clear();
+	CloseHandle(DEV_hCom);
+	FrmMain->Refresh();
+}
+void cCOM::QueueClear()//Queue Clear
+{
+	/*while(!FrmMain->que_cmd.empty())
+	{
+		FrmMain->que_cmd.pop();
+	} */
+}
+double cCOM::GetNumOfString(AnsiString String)
+{
+	TCHAR HexChar[10];
+	bool bPoint = false;
+	AnsiString sResult = "";
+	int DecimalPlace = 0;
+
+	try
+	{
+		String = String.UpperCase();// 把字串轉成全大寫
+		_tcscpy_s(HexChar, 10, WideString(String).c_bstr());
+		for(int j=0;j<String.Length();j++)
+		{
+			if(HexChar[j] < 0x30 || HexChar[j] > 0x39){
+				if(HexChar[j] == 0x2E)
+				{
+					if(!bPoint&&j==0)
+					{
+						sResult+="0";
+					}
+					sResult+=HexChar[j];
+					bPoint = true;
+				}
+			}
+			else
+			{
+				if(bPoint) DecimalPlace++;
+				sResult+=HexChar[j];
+			}
+			if(DecimalPlace==3) break;
+		}
+
+		return sResult.ToDouble();
+	}
+	catch(...)
+	{
+	   return 0;
+    }
+}
