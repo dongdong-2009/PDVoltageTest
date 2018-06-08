@@ -1,0 +1,151 @@
+//---------------------------------------------------------------------------
+
+#ifndef mainH
+#define mainH
+
+#include <Classes.hpp>
+#include <Controls.hpp>
+#include <StdCtrls.hpp>
+#include <Forms.hpp>
+//---------------------------------------------------------------------------
+#include <dbt.h> //DBT_常數 註冊要取得的裝置消息
+#include "HID.h"
+#include "IO_Request.h"
+#include "DeviceNotify.h"
+#include <Buttons.hpp>
+#include <Registry.hpp>
+#include <ExtCtrls.hpp>
+#include <Mask.hpp>
+
+const AnsiString APP_TITLE = "PD Voltage Test Tool  ver 1.0.0 for RD ( Action Star Enterprise Co., Ltd. )";
+//
+const AnsiString SetVoltage[5] = //5V , 9V , 12V ,15V ,20V
+{
+ "03 14 04 70 33 01 01" ,
+ "03 14 04 70 33 01 02" ,
+ "03 14 04 70 33 01 03" ,
+ "03 14 04 70 33 01 04" ,
+ "03 14 04 70 33 01 05"
+ };
+const AnsiString ExecuteVoltageSetting = "03 14 07 70 08 04 41 4E 65 67";
+const AnsiString ReadADValue = "03 13 E8 FF 90";
+
+const float UNIT = 0.0195; //單位元電壓值
+
+//GUID
+const char GUID_USB_HUB[] = "{F18A0E88-C30C-11D0-8815-00A0C906BED8}";
+const char GUID_USB_DEVICE[] = "{A5DCBF10-6530-11D2-901F-00C04FB951ED}";
+const char GUID_HID[] = "{4d1e55b2-f16f-11cf-88cb-001111000030}";
+
+// HID PVID
+const wchar_t PD_BOARD_PVID[] = L"hid#vid_0835&pid_fe00";
+//
+#define GET_VALUE_TIMEOUT_MS 500
+#define TIME_INTERVAL 200
+#define HARDWARE_VOLTAGE_COMPENSATION 8
+
+#define HID_IS_ONLINE		0
+#define HID_TURN_ON			1
+#define SET_VOLTAGE			2
+#define EXECUTE_SETTING 	3
+#define READ_AD_VALUE		4
+#define TEST_VOLTAGE_PASS	5
+#define TEST_VOLTAGE_FAIL	6
+#define HID_NOT_FIND		7
+
+#define DEBUG(String)    moDebug->Lines->Add(String)
+
+//---------------------------------------------------------------------------
+
+class TFrmMain : public TForm
+{
+__published:	// IDE-managed Components
+	TMemo *moDebug;
+	TPanel *pl_Memo_Switch;
+	TPanel *Panel1;
+	TPanel *Panel2;
+	TPanel *Panel3;
+	TPanel *Panel4;
+	TPanel *Panel5;
+	TPanel *Panel6;
+	TPanel *pl_read_5v_voltage;
+	TPanel *pl_read_9v_voltage;
+	TPanel *pl_read_12v_voltage;
+	TPanel *pl_read_15v_voltage;
+	TPanel *pl_read_20v_voltage;
+	TBitBtn *btnStart;
+	TPanel *pl_Auto;
+	TPanel *pl_Auto9V;
+	TPanel *pl_Auto5V;
+	TPanel *pl_Auto12V;
+	TPanel *pl_Auto15V;
+	TPanel *pl_Auto20V;
+	TCheckBox *ckbAuto;
+	TPanel *Panel7;
+	TPanel *pl_DutVPID;
+	TPanel *Panel9;
+	TPanel *Panel10;
+	TPanel *Panel11;
+	TPanel *Panel12;
+	TEdit *edtVID;
+	TEdit *edtPID;
+	TPanel *plSet5V;
+	TPanel *plSet9V;
+	TPanel *plSet12V;
+	TPanel *plSet15V;
+	TPanel *plSet20V;
+	TLabel *lbRange1;
+	TLabel *lbRange2;
+	TLabel *lbRange3;
+	TLabel *lbRange4;
+	TLabel *lbRange5;
+	TTimer *Timer1;
+	bool __fastcall HID_ReadReport(AnsiString Value);
+	void __fastcall EnumHID();
+	void __fastcall UI_DisplayCmd(unsigned char *pBuf, int size);
+	void __fastcall btnStartClick(TObject *Sender);
+	void __fastcall pl_Auto5VClick(TObject *Sender);
+	void __fastcall FormClose(TObject *Sender, TCloseAction &Action);
+	void __fastcall ckbAutoClick(TObject *Sender);
+	void __fastcall edtVIDChange(TObject *Sender);
+	void __fastcall FormResize(TObject *Sender);
+	void __fastcall plSet5VClick(TObject *Sender);
+
+	void __fastcall pl_Memo_SwitchMouseDown(TObject *Sender, TMouseButton Button, TShiftState Shift,
+		  int X, int Y);
+	void __fastcall pl_Memo_SwitchMouseMove(TObject *Sender, TShiftState Shift, int X,
+		  int Y);
+	void __fastcall pl_Memo_SwitchMouseUp(TObject *Sender, TMouseButton Button, TShiftState Shift,
+		  int X, int Y);
+	void __fastcall moDebugChange(TObject *Sender);
+private:	// User declarations
+	HID m_hid;
+	IO_Request m_ir, m_or;
+	AnsiString m_ADValue;
+	TPanel *zVoltageSetting[5];
+	TPanel *zRead_AD_Voltage[5];
+	TPanel *zAuto_Test[5];
+
+	void Tx(AnsiString Value);
+	bool Rx(AnsiString Value);
+	void Rx_ValueAnalyze(AnsiString Value);
+	bool HID_TurnOn();
+	void HID_TurnOff();
+	void Voltage_Test(AnsiString CMD);
+
+	int  HexToInt(AnsiString HexStr);
+	void ReadRegSet();
+	void SetRegVal(AnsiString numTestItem,bool AutoTest,AnsiString DutVPID);
+	bool CheckVPIDSET(TEdit * edt);
+	void Delay(int iMilliSeconds);
+	//USB拔插消息
+	DeviceNotification g_DeviceNogification;
+	TWndMethod OldWindowProc;
+	void __fastcall MyWindowProc(TMessage&);
+public:		// User declarations
+	__fastcall TFrmMain(TComponent* Owner);
+};
+//---------------------------------------------------------------------------
+extern PACKAGE TFrmMain *FrmMain;
+//---------------------------------------------------------------------------
+#endif

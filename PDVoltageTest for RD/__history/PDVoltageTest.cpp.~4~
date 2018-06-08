@@ -1,0 +1,45 @@
+//---------------------------------------------------------------------------
+
+#include <vcl.h>
+#pragma hdrstop
+#include <tchar.h>
+//---------------------------------------------------------------------------
+USEFORM("main.cpp", FrmMain);
+//---------------------------------------------------------------------------
+WINAPI _tWinMain(HINSTANCE, HINSTANCE, LPTSTR, int)
+{
+	HWND hwnd = NULL;
+	hwnd = FindWindowA(NULL,APP_TITLE.c_str());
+   //由 project/Options/Application/Title設定而來
+   //"TApplication" 只有真正執行時(有實體存在)才會找到
+	if(hwnd)
+	{ //程式已執行...
+		MessageBoxA(NULL,"Application is already running","WARNING", MB_ICONEXCLAMATION);
+	 return 0;
+	}
+	try
+	{
+		Application->Initialize();
+		Application->Title = APP_TITLE; //同上
+		Application->MainFormOnTaskBar = true;
+		Application->CreateForm(__classid(TFrmMain), &FrmMain);
+		Application->Run();
+	}
+	catch (Exception &exception)
+	{
+		Application->ShowException(&exception);
+	}
+	catch (...)
+	{
+		try
+		{
+			throw Exception("");
+		}
+		catch (Exception &exception)
+		{
+			Application->ShowException(&exception);
+		}
+	}
+	return 0;
+}
+//---------------------------------------------------------------------------
